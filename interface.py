@@ -7,7 +7,9 @@ from whatsbot import WhatsAppBot
 class Application:
     def __init__(self, master=None):
         self.master = master  # Atribuir o parâmetro master ao atributo self.master
-        self.whatsapp_bot = None 
+        self.bot = None
+        self.monitor_on_of = None 
+        self.negocio = Negocio()
         
         icon_path = os.path.join("assets", "logo.png")  # Caminho relativo para o ícone
         self.icon = PhotoImage(file=icon_path)  # Carregar o ícone
@@ -119,11 +121,13 @@ class Application:
         menu_arquivo = Menu(menu_opcoes, tearoff=0)
         menu_arquivo.add_command(label="Configuração", command=self.funcao_salvar_configuracao)
         menu_arquivo.add_command(label="Desconectar Whatsapp", command=self.desconectar_whatsapp)
+        menu_arquivo.add_command(label="Painel", command=self.abrir_dashboard)
         menu_arquivo.add_command(label="Fechar", command=lambda: self.fechar_opcoes(opcoes_janela))        
         menu_opcoes.add_cascade(label="Arquivo", menu=menu_arquivo)
 
         # Menu Ajuda
         menu_ajuda = Menu(menu_opcoes, tearoff=0)
+        # menu_ajuda.add_command(label="Painel", command=self.abrir_dashboard)
         menu_ajuda.add_command(label="Sobre", command=self.funcao_sobre)
         menu_opcoes.add_cascade(label="Ajuda", menu=menu_ajuda)
 
@@ -132,11 +136,13 @@ class Application:
         self.botao_whatsapp.pack(pady=10)
 
         # Botão 2
-        botao2 = Button(opcoes_janela, text="Conexão Instagran", font=self.fontePadrao, command=self.instagra_conection)
+        botao2 = Button(opcoes_janela, text="Conexão Instagram", font=self.fontePadrao, command=self.instagra_conection)
         botao2.pack(pady=10)
 
         # Configurar para reexibir a janela de autenticação ao fechar a janela de opções
         opcoes_janela.protocol("WM_DELETE_WINDOW", lambda: self.fechar_opcoes(opcoes_janela))
+    
+    
     
     def whastapp_conection(self):
         """ Lógica para abrir o browser com whatsapp"""
@@ -191,21 +197,22 @@ class Application:
         print("chamar regra de negocio 2")
 
     def fechar_opcoes(self, opcoes_janela):
-            """Fecha a janela de opções e reexibe a janela de autenticação."""
-            desconecta = WhatsAppBot()
-            desconecta.desconectar()
-            opcoes_janela.destroy()
-            self.master.deiconify()
+        """Fecha a janela de opções e reexibe a janela de autenticação."""
+        if self.bot:
+            self.bot.desconectar()
+            self.bot = None
+        opcoes_janela.destroy()
+        self.master.deiconify()
             
             
     
     def desconectar_whatsapp(self):
         """Desconecta do WhatsApp Web e reseta o botão."""
-        desconecta = WhatsAppBot()
-        desconecta.verificar_conexao()
-        if desconecta:
+        if self.bot:
             # Volta o botão ao estado original
-            desconecta.desconectar()
+            self.bot.desconectar()
+            self.bot = None
+
             self.botao_whatsapp.config(bg="SystemButtonFace", text="Conexão Whatsapp")
             messagebox.showinfo("Desconectado", "WhatsApp foi desconectado com sucesso.")
         else:
@@ -251,38 +258,210 @@ class Application:
         else:
             messagebox.showerror("Erro", "Erro ao salvar as configurações.")
     
+    #abrir o dashboard para operação do Whatsapp
+    def abrir_dashboard(self):
+        dashboard = Toplevel()
+        dashboard.title("Painel")
+        self.centralizar_janela(dashboard, 400, 300)
+
+        # Menu do dashboard
+        menu_dashboard = Menu(dashboard)
+        dashboard.config(menu=menu_dashboard)
+
+        # Menu Cadastro
+        menu_cadastro = Menu(menu_dashboard, tearoff=0)
+        menu_cadastro.add_command(label="Nova Categoria", command=lambda: self.abrir_cadastro_categoria(dashboard))
+        menu_cadastro.add_command(label="Novo Produto", command=lambda: self.abrir_cadastro_produto(dashboard))
+        menu_dashboard.add_cascade(label="Cadastro", menu=menu_cadastro)
+
+        #Menu Operação
+        menu_operacao  = Menu(menu_dashboard, tearoff=0)
+        menu_operacao.add_command(label="ON monitor de Mensagens", command=self.liga_monitora_messages)
+        menu_operacao.add_command(label="OFF monitor de Mensagens", command=self.desliga_monitora_messages)
+        menu_dashboard.add_cascade(label="Operação", menu=menu_operacao)
+
+        Button(dashboard, text="Ver Pedidos", font=self.fontePadrao, command=self.abrir_lista_pedidos).pack(pady=5)
+        Button(dashboard, text="Ver Atendimentos", font=self.fontePadrao, command=self.abrir_lista_atendimentos).pack(pady=5)
+
+        Label(dashboard, text=f"Usuário conectado: {self.usuario_conectado}", font=self.fontePadrao).pack(pady=5)
+        Label(dashboard, text="Mensagem:", font=self.fontePadrao).pack(pady=5)
+        mensagem_entry = Entry(dashboard, width=30, font=self.fontePadrao)
+        mensagem_entry.pack(pady=5)
+
+        Button(
+            dashboard,
+            text="Enviar Mensagem",
+            font=self.fontePadrao,
+            command=lambda: self.enviar_mensagem_dashboard(self.usuario_conectado, mensagem_entry.get())
+        ).pack(pady=10)
+
+    # Liga o monitoramento das mensagens
+    def liga_monitora_messages(self):
+        self.monitor_on_of = "on"
+        if self.bot and self.usuario_conectado:
+            # Passa uma função que retorna o status atual do monitor
+            self.bot.iniciar_monitoramento(
+                self.usuario_conectado,
+                lambda: self.monitor_on_of
+            )
+        else:
+            messagebox.showerror("Erro", "Conecte o WhatsApp e selecione um usuário antes de monitorar.")
     
+    # Desliga o monitoramento das mensagens
+    def desliga_monitora_messages(self):
+        self.monitor_on_of = "off"
+    
+    #abre a tela de cadastro de categoria
+    def abrir_cadastro_categoria(self, parent):
+        janela_categoria = Toplevel(parent)
+        janela_categoria.title("Nova Categoria")
+        self.centralizar_janela(janela_categoria, 300, 150)
+
+        Label(janela_categoria, text="Nome da Categoria:", font=self.fontePadrao).pack(pady=5)
+        entry_categoria = Entry(janela_categoria, width=30, font=self.fontePadrao)
+        entry_categoria.pack(pady=5)
+
+        Button(
+            janela_categoria,
+            text="Salvar",
+            font=self.fontePadrao,
+            command=lambda: self.salvar_categoria(entry_categoria.get(), janela_categoria)
+        ).pack(pady=10)
+
+    #Abre a tela de cadastro de Produtos
+    def abrir_cadastro_produto(self, parent):
+        janela_produto = Toplevel(parent)
+        janela_produto.title("Novo Produto")
+        self.centralizar_janela(janela_produto, 300, 200)
+
+        Label(janela_produto, text="Nome do Produto:", font=self.fontePadrao).pack(pady=5)
+        entry_produto = Entry(janela_produto, width=30, font=self.fontePadrao)
+        entry_produto.pack(pady=5)
+
+        Label(janela_produto, text="Observaçoes:", font=self.fontePadrao).pack(pady=5)
+        entry_observacao = Entry(janela_produto, width=30, font=self.fontePadrao)
+        entry_observacao.pack(pady=5)
+
+        Label(janela_produto, text="Valor de venda:", font=self.fontePadrao).pack(pady=5)
+        entry_valor_venda = Entry(janela_produto,width=30, font=self.fontePadrao)
+        entry_valor_venda.pack(pady=5)
+
+       
+        Label(janela_produto, text="Escolha uma categoria:", font=self.fontePadrao).pack(pady=5)
+        # Aqui você pode buscar as categorias do banco e popular um OptionMenu ou Listbox
+        categorias = self.obter_categorias()
+        var_categoria = StringVar(janela_produto)
+        if categorias:
+            var_categoria.set(categorias[0])  # Seleciona a primeira categoria por padrão
+        option_categoria = OptionMenu(janela_produto, var_categoria, *categorias)
+        option_categoria.pack(pady=5)
+
+        Button(
+            janela_produto,
+            text="Salvar",
+            font=self.fontePadrao,
+            command=lambda: self.salvar_produto(entry_produto.get(), entry_observacao.get(), entry_valor_venda.get(), var_categoria.get(), janela_produto)
+        ).pack(pady=10)
+
+    def obter_categorias(self):
+        negocio = Negocio()
+        categorias = negocio.lista_categorias()
+        return [cat[0] for cat in categorias]  # Ajuste conforme o retorno do seu banco
+    
+    
+    def salvar_categoria(self, nome_categoria, janela):
+        if not nome_categoria:
+            messagebox.showerror("Erro", "O nome da categoria é obrigatório!")
+            return
+        negocio = Negocio()
+        sucesso = negocio.salvar_categoria(nome_categoria)
+        if sucesso:
+            messagebox.showinfo("Sucesso", "Categoria cadastrada com sucesso!")
+            janela.destroy()
+        else:
+            messagebox.showerror("Erro", "Erro ao cadastrar categoria.")
+
+
+
+    def salvar_produto(self, nome_produto, observacao, valor_venda, categoria, janela):
+        if not nome_produto or not categoria or not observacao or not valor_venda:
+            messagebox.showerror("Erro", "Todos os campos são obrigatórios!")
+            return
+       
+       # Validação e conversão do valor de venda
+        valor = valor_venda.strip()
+        try:
+            valor_float = float(valor.replace(',', '.'))  # Aceita vírgula ou ponto
+        except ValueError:
+            messagebox.showerror("Erro", "Digite um valor numérico válido para o preço!")
+            return
+       
+       
+        negocio = Negocio()
+        sucesso = negocio.salvar_produto(nome_produto, observacao, valor_float, categoria)
+        if sucesso:
+            messagebox.showinfo("Sucesso", "Produto cadastrado com sucesso!")
+            janela.destroy()
+        else:
+            messagebox.showerror("Erro", "Erro ao cadastrar produto.")
+    
+    def enviar_mensagem_dashboard(self, usuario, mensagem):
+        if not usuario or not mensagem:
+            messagebox.showerror("Erro", "Usuário e mensagem são obrigatórios!")
+            return
+
+        if not self.bot or not self.bot.verificar_conexao():
+            messagebox.showerror("Erro", "WhatsApp não está conectado!")
+            return
+
+        try:
+            self.bot.enviar_mensagem(usuario, mensagem)
+            messagebox.showinfo("Sucesso", "Mensagem enviada com sucesso!")
+        except Exception as e:
+            messagebox.showerror("Erro", f"Falha ao enviar mensagem: {e}")    
+
+
     #Click Botão para iniciar o monitoramento
     def chamarwhats(self, usuario, janela):
-        """Chama o browser e abre o whatsapp """
         if not usuario:
             messagebox.showerror("Erro", "Todos os campos são obrigatórios!")
             return
-        #verificar se ja esta aberto a janela com o sistema Whatsapp
-        verwhats = WhatsAppBot()
-        vaberto = verwhats.verificar_conexao()
-        if vaberto:
-              whatsnegocio = Negocio()
-              abertook = whatsnegocio.whastapp_conection(usuario)
-              if abertook:
-                    messagebox.showinfo("Sucesso", "Usuario enviado com Sucesso")
-                    # Alterar a cor e o texto do botão que chamou esta função
-                    self.botao_whatsapp.config(bg="green", text="Conectado")
-                    janela.destroy()
+
+        if not self.bot:
+            self.bot = WhatsAppBot()
+            self.bot.iniciar_driver()
+            self.bot.conectar_whatsapp()
+
+        if self.bot.verificar_conexao():
+            # ... lógica de envio ...
+            self.usuario_conectado = usuario  # <-- GUARDA O USUÁRIO
+
+            messagebox.showinfo("Sucesso", "Usuario enviado com Sucesso")
+            self.botao_whatsapp.config(bg="green", text="Conectado")
+            janela.destroy()
         else:
             messagebox.showwarning("Alerta", "Whatsapp não sincronizado!")
-            bot = WhatsAppBot()
-            bot.iniciar_driver()
-            bot.conectar_whatsapp()
-            bot.verificar_conexao()
-            if bot:
-                print("agora esta aberto essa jossa mano.... vai não para")
-                whatsnegocio = Negocio()
-                abertook = whatsnegocio.whastapp_conection(usuario)
-                if abertook:
-                    messagebox.showinfo("Sucesso", "Usuario enviado com Sucesso")
-                    self.botao_whatsapp.config(bg="green", text="Conectado")
-                    janela.destroy()
 
     def funcao_sobre(self):
         messagebox.showinfo("Sobre", "Criar interface para digitar texto sobre o sistema")
+    
+
+    def abrir_lista_pedidos(self):
+        janela = Toplevel()
+        janela.title("Lista de Pedidos")
+        self.centralizar_janela(janela, 800, 400)
+        pedidos = self.negocio.listar_pedidos()
+        listbox = Listbox(janela, width=120, font=self.fontePadrao)
+        for pedido in pedidos:
+            listbox.insert(END, f"{pedido['data']} | {pedido['contato']} | {pedido['categoria']} | {pedido['produto']} | {pedido['endereco']}")
+        listbox.pack(padx=10, pady=10, fill=BOTH, expand=True)
+
+    def abrir_lista_atendimentos(self):
+        janela = Toplevel()
+        janela.title("Histórico de Atendimentos")
+        self.centralizar_janela(janela, 900, 400)
+        atendimentos = self.negocio.listar_atendimentos()
+        listbox = Listbox(janela, width=140, font=self.fontePadrao)
+        for at in atendimentos:
+            listbox.insert(END, f"{at['ultima_interacao']} | {at['contato']} | {at['estado']} | {at['categoria']} | {at['produto']} | {at['endereco']}")
+        listbox.pack(padx=10, pady=10, fill=BOTH, expand=True)

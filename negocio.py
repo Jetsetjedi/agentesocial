@@ -38,10 +38,35 @@ class Negocio:
                 print(f"Erro ao autenticar usuário: {e}")
                 return False
             finally:
+                print("ATENÇÂO NÃO DEIXE ESSA MENSAGEM EM PRODUÇÃO")
                 cursor.close()
                 connection.close()
         else:
-            print("Erro ao conectar ao banco de dados.")
+            print("ATENÇÂO NÃO DEIXE ESSA MENSAGEM IR PARA PRODUÇÃO")
+            # seria para buscar dados local com o erro de conexao remoto TEMP TEMP nao mexer
+            return True #<<<< True é TEMP TEMP TEMP
+        
+    # Metodo de usu exclusivo de testes não usar no comercio
+    def inserir_usuario_local(self, usuario, senha):
+        """Insere um usuário na tabela local do SQLite."""
+        conn = conexaosqllt()
+        if conn:
+            try:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "INSERT INTO usuarios (usuario, senha) VALUES (?, ?)",
+                    (usuario, senha)
+                )
+                conn.commit()
+                return True
+            except Exception as e:
+                print(f"Erro ao inserir usuário local: {e}")
+                return False
+            finally:
+                cursor.close()
+                conn.close()
+        else:
+            print("Erro ao conectar ao banco local.")
             return False
     
     def salvar_configuracao(self, usuario):
@@ -124,7 +149,222 @@ class Negocio:
         else:
             print("Erro ao conectar ao banco de dados.")
             return False
+       
 
+    def salvar_categoria(self, nome_categoria):
+        """Salva uma nova categoria no banco local."""
+        conn = conexaosqllt()
+        if conn:
+            try:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "INSERT INTO categorias (nome) VALUES (?)",
+                    (nome_categoria,)
+                )
+                conn.commit()
+                return True
+            except Exception as e:
+                print(f"Erro ao salvar categoria: {e}")
+                return False
+            finally:
+                cursor.close()
+                conn.close()
+        else:
+            print("Erro ao conectar ao banco local.")
+            return False
+
+
+    def salvar_produto(self, nome_produto, observacao, valor_venda, categoria):
+        """Salva um novo produto no banco local, vinculado a uma categoria."""
+        conn = conexaosqllt()
+        if conn:
+            try:
+                cursor = conn.cursor()
+                # Busca o id da categoria pelo nome
+                cursor.execute(
+                    "SELECT id FROM categorias WHERE nome = ?",
+                    (categoria,)
+                )
+                cat_row = cursor.fetchone()
+                if not cat_row:
+                    print("Categoria não encontrada.")
+                    return False
+                id_categoria = cat_row[0]
+                cursor.execute(
+                    "INSERT INTO produtos (nome, observacao, valor_venda, categoria_id) VALUES (?, ?, ?, ?)",
+                    (nome_produto, observacao, valor_venda, id_categoria)
+                )
+                conn.commit()
+                return True
+            except Exception as e:
+                print(f"Erro ao salvar produto: {e}")
+                return False
+            finally:
+                cursor.close()
+                conn.close()
+        else:
+            print("Erro ao conectar ao banco local.")
+            return False
+
+    def lista_categorias(self):
+        """Retorna uma lista de categorias cadastradas no banco local."""
+        conn = conexaosqllt()
+        if conn:
+            try:
+                cursor = conn.cursor()
+                cursor.execute("SELECT nome FROM categorias")
+                categorias = cursor.fetchall()
+                return categorias if categorias else []
+            except Exception as e:
+                print(f"Erro ao listar categorias: {e}")
+                return []
+            finally:
+                cursor.close()
+                conn.close()
+        else:
+            print("Erro ao conectar ao banco local.")
+            return []
+        
+    # negocio.py
+    def lista_produtos_por_categoria(self, categoria_nome):
+        conn = conexaosqllt()
+        if conn:
+            try:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT p.nome FROM produtos p JOIN categorias c ON p.categoria_id = c.id WHERE c.nome = ?",
+                    (categoria_nome,)
+                )
+                produtos = cursor.fetchall()
+                return produtos if produtos else []
+            except Exception as e:
+                print(f"Erro ao listar produtos: {e}")
+                return []
+            finally:
+                cursor.close()
+                conn.close()
+        else:
+            print("Erro ao conectar ao banco local.")
+            return []
+    
+    def lista_produtos_por_categoria_completo(self, categoria_nome):
+        conn = conexaosqllt()
+        produtos = []
+        if conn:
+            try:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT p.nome, p.observacao, p.valor_venda FROM produtos p JOIN categorias c ON p.categoria_id = c.id WHERE c.nome = ?",
+                    (categoria_nome,)
+                )
+                produtos = cursor.fetchall()
+            finally:
+                cursor.close()
+                conn.close()
+        return produtos
+        
+  
+    def salvar_atendimento(self, contato, estado, categoria=None, produto=None, endereco=None):
+        conn = conexaosqllt()
+        if conn:
+            try:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT INTO atendimentos (contato, estado, categoria, produto, endereco, ultima_interacao)
+                    VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(contato) DO UPDATE SET
+                        estado=excluded.estado,
+                        categoria=excluded.categoria,
+                        produto=excluded.produto,
+                        endereco=excluded.endereco,
+                        ultima_interacao=CURRENT_TIMESTAMP
+                """, (contato, estado, categoria, produto, endereco))
+                conn.commit()
+            except Exception as e:
+                print(f"Erro ao salvar atendimento: {e}")
+            finally:
+                cursor.close()
+                conn.close()
+
+    def carregar_atendimentos(self):
+        conn = conexaosqllt()
+        atendimentos = {}
+        if conn:
+            try:
+                cursor = conn.cursor()
+                cursor.execute("SELECT contato, estado, categoria, produto, endereco FROM atendimentos")
+                for contato, estado, categoria, produto, endereco in cursor.fetchall():
+                    if estado == "menu_categorias":
+                        atendimentos[contato] = estado
+                    elif estado == "menu_produtos":
+                        atendimentos[contato] = (estado, categoria)
+                    elif estado == "confirmar_produto":
+                        atendimentos[contato] = (estado, categoria, produto)
+                    elif estado == "coletar_endereco":
+                        atendimentos[contato] = (estado, categoria, produto)
+            except Exception as e:
+                print(f"Erro ao carregar atendimentos: {e}")
+            finally:
+                cursor.close()
+                conn.close()
+        return atendimentos
+
+    def registrar_pedido(self, contato, categoria, produto, endereco):
+        conn = conexaosqllt()
+        if conn:
+            try:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT INTO pedidos (contato, categoria, produto, endereco)
+                    VALUES (?, ?, ?, ?)
+                """, (contato, categoria, produto, endereco))
+                conn.commit()
+            except Exception as e:
+                print(f"Erro ao registrar pedido: {e}")
+            finally:
+                cursor.close()
+                conn.close()
+
+    def listar_pedidos(self):
+        conn = conexaosqllt()
+        pedidos = []
+        if conn:
+            try:
+                cursor = conn.cursor()
+                cursor.execute("SELECT data_pedido, contato, categoria, produto, endereco FROM pedidos ORDER BY data_pedido DESC")
+                for row in cursor.fetchall():
+                    pedidos.append({
+                        "data": row[0],
+                        "contato": row[1],
+                        "categoria": row[2],
+                        "produto": row[3],
+                        "endereco": row[4]
+                    })
+            finally:
+                cursor.close()
+                conn.close()
+        return pedidos
+
+    def listar_atendimentos(self):
+        conn = conexaosqllt()
+        atendimentos = []
+        if conn:
+            try:
+                cursor = conn.cursor()
+                cursor.execute("SELECT contato, estado, categoria, produto, endereco, ultima_interacao FROM atendimentos ORDER BY ultima_interacao DESC")
+                for row in cursor.fetchall():
+                    atendimentos.append({
+                        "contato": row[0],
+                        "estado": row[1],
+                        "categoria": row[2],
+                        "produto": row[3],
+                        "endereco": row[4],
+                        "ultima_interacao": row[5]
+                    })
+            finally:
+                cursor.close()
+                conn.close()
+        return atendimentos
 
 
 #FUNÇÔES exclusivas da classe Negocio

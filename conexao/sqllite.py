@@ -15,13 +15,79 @@ def inicializar_banco():
     if conn:
         try:
             cursor = conn.cursor()
+            # Criação da tabela local de configuração
             cursor.execute("""
-                CREATE TABLE IF NOT EXISTS configuracoes (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    nome_no_whatsapp TEXT NOT NULL,
-                    sincronizado    TEXT NULL
-                ) 
+                    CREATE TABLE IF NOT EXISTS configuracoes (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        nome_no_whatsapp TEXT NOT NULL,
+                        sincronizado    TEXT NULL
+                    ) 
             """)
+            # Criação da tabela usuarios local
+            cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS usuarios (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        usuario TEXT NOT NULL,
+                        senha TEXT NOT NULL
+                    )
+            """)
+            # Criação da tabela de categorias
+            cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS categorias (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        nome TEXT NOT NULL UNIQUE
+                    )
+            """)
+            # Criação da tabela de produtos
+            cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS produtos (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        nome         TEXT NOT NULL,
+                        observacao   TEXT NOT NULL,
+                        valor_venda REAL NOT NULL DEFAULT 0.0,
+                        categoria_id INTEGER NOT NULL,
+                           
+                        FOREIGN KEY (categoria_id) REFERENCES categorias(id)
+                    )    
+
+            """)
+            # Tabela para persistir atendimentos
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS atendimentos (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    contato TEXT NOT NULL UNIQUE,
+                    estado TEXT NOT NULL,
+                    categoria TEXT,
+                    produto TEXT,
+                    endereco TEXT,
+                    ultima_interacao DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            # Tabela para registrar pedidos
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS pedidos (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    contato TEXT NOT NULL,
+                    categoria TEXT,
+                    produto TEXT,
+                    endereco TEXT,
+                    data_pedido DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # Adiciona colunas novas se não existirem (exemplo para produtos)
+            # Adicionando 'observacao'
+            try:
+                cursor.execute("ALTER TABLE produtos ADD COLUMN observacao TEXT NOT NULL DEFAULT ''")
+            except sqlite3.OperationalError:
+                pass  # Já existe
+
+            # Adicionando 'valor_venda'
+            try:
+                cursor.execute("ALTER TABLE produtos ADD COLUMN valor_venda REAL NOT NULL DEFAULT 0.0")
+            except sqlite3.OperationalError:
+                pass  # Já existe
+
             conn.commit()
         except sqlite3.Error as e:
             print(f"Erro ao criar a tabela: {e}")
