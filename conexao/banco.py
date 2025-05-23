@@ -4,10 +4,10 @@ from mysql.connector import Error
 def conexao():
     try:
         connection = mysql.connector.connect(
-            host="vbdatabase.mysql.dbaas.com.br",
-            user="vbdatabase",
-            password="Sagrado@42",
-            database="vbdatabase"
+            host=" database-1.cth3fbnggspb.sa-east-1.rds.amazonaws.com",
+            user="jetset",
+            password="jAqrps2FtAKh4gDY1mM7",
+            database="agentesocial"
         )
         if connection.is_connected():
             return connection

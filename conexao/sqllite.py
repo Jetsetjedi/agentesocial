@@ -75,8 +75,7 @@ def inicializar_banco():
                 )
             """)
 
-            # Adiciona colunas novas se não existirem (exemplo para produtos)
-            # Adicionando 'observacao'
+            # Adiciona colunas novas se não existirem em (produtos)
             try:
                 cursor.execute("ALTER TABLE produtos ADD COLUMN observacao TEXT NOT NULL DEFAULT ''")
             except sqlite3.OperationalError:
@@ -87,6 +86,34 @@ def inicializar_banco():
                 cursor.execute("ALTER TABLE produtos ADD COLUMN valor_venda REAL NOT NULL DEFAULT 0.0")
             except sqlite3.OperationalError:
                 pass  # Já existe
+            
+            
+            # Adicionando campos na tabela pedidos    
+            try:
+                cursor.execute("ALTER TABLE pedidos ADD COLUMN observacao TEXT")
+            except sqlite3.OperationalError:
+                pass  # Já existe
+
+            try:
+                cursor.execute("ALTER TABLE pedidos ADD COLUMN valor REAL")
+            except sqlite3.OperationalError:
+                pass
+
+            try:
+                cursor.execute("ALTER TABLE pedidos ADD COLUMN nome_cliente TEXT")
+            except sqlite3.OperationalError:
+                pass
+
+            try:
+                cursor.execute("ALTER TABLE pedidos ADD COLUMN referencia TEXT")
+            except sqlite3.OperationalError:
+                pass
+
+            try:
+                cursor.execute("ALTER TABLE pedidos ADD COLUMN quantidade INTEGER;")
+            except sqlite3.OperationalError:
+                pass
+
 
             conn.commit()
         except sqlite3.Error as e:

@@ -3,6 +3,7 @@ from tkinter import messagebox
 import os
 from negocio import Negocio  # Importa a lógica de negócios
 from whatsbot import WhatsAppBot
+from painel_admin import PainelAdmin
 
 class Application:
     def __init__(self, master=None):
@@ -86,6 +87,7 @@ class Application:
         autenticado = negocio.autenticar_usuario(usuario, senha)
 
         if autenticado:
+            self.usuario_conectado = usuario  # <-- Adicione esta linha
             self.mensagem["text"] = "Autenticado"
             # Abrir outra janela para as opções
             self.abrir_opcoes()
@@ -95,6 +97,8 @@ class Application:
         else:
             self.exibir_mensagem()
             self.limpar_campos()
+    
+    
     
     
    # Função que será chamada ao clicar no botão
@@ -193,8 +197,17 @@ class Application:
 
 
     def instagra_conection(self):
-        # Lógica para a Opção 2
-        print("chamar regra de negocio 2")
+        messagebox.showinfo(
+            "Em breve: Integração com Instagram",
+            (
+                "🚀 *Feature em desenvolvimento!*\n\n"
+                "A integração automática com Instagram será liberada em breve para todos os clientes licenciados.\n\n"
+                "Aproveite seus 7 dias de teste para explorar todas as funcionalidades atuais do sistema.\n"
+                "Após o período beta, novas integrações e módulos exclusivos estarão disponíveis para quem se licenciar.\n\n"
+                "Fique atento: o futuro da automação digital está chegando aqui primeiro!\n"
+                "Garanta já sua licença e saia na frente! 😉"
+            )
+        )
 
     def fechar_opcoes(self, opcoes_janela):
         """Fecha a janela de opções e reexibe a janela de autenticação."""
@@ -332,7 +345,7 @@ class Application:
     def abrir_cadastro_produto(self, parent):
         janela_produto = Toplevel(parent)
         janela_produto.title("Novo Produto")
-        self.centralizar_janela(janela_produto, 300, 200)
+        self.centralizar_janela(janela_produto, 400, 400)
 
         Label(janela_produto, text="Nome do Produto:", font=self.fontePadrao).pack(pady=5)
         entry_produto = Entry(janela_produto, width=30, font=self.fontePadrao)
@@ -443,18 +456,47 @@ class Application:
             messagebox.showwarning("Alerta", "Whatsapp não sincronizado!")
 
     def funcao_sobre(self):
-        messagebox.showinfo("Sobre", "Criar interface para digitar texto sobre o sistema")
+        janela = Toplevel()
+        janela.title("Sobre o Sistema")
+        self.centralizar_janela(janela, 500, 300)
+        texto = (
+            "🚀 *Sistema de Atendimento Automático via WhatsApp*\n\n"
+            "Versão Beta - Licença de Teste 7 dias\n"
+            "Desenvolvido por Jether com apoio do GitHub Copilot\n\n"
+            "Este sistema permite automatizar vendas, cadastro de pedidos, integração com Mercado Pago e muito mais.\n\n"
+            "Para dúvidas, sugestões ou contratação, entre em contato:\n"
+            "E-mail: jether.feliciano@outlook.com\n"
+            "WhatsApp: (19) 98222-7092\n\n"
+            "Todos os direitos reservados © 2025"
+        )
+        Label(janela, text=texto, justify="left", font=self.fontePadrao, wraplength=480).pack(padx=20, pady=20)
+        Button(janela, text="Fechar", command=janela.destroy).pack(pady=10)
     
 
+    # Abre lista de Pedidos
     def abrir_lista_pedidos(self):
         janela = Toplevel()
         janela.title("Lista de Pedidos")
-        self.centralizar_janela(janela, 800, 400)
+        self.centralizar_janela(janela, 1000, 400)
         pedidos = self.negocio.listar_pedidos()
-        listbox = Listbox(janela, width=120, font=self.fontePadrao)
+        listbox = Listbox(janela, width=160, font=self.fontePadrao)
         for pedido in pedidos:
-            listbox.insert(END, f"{pedido['data']} | {pedido['contato']} | {pedido['categoria']} | {pedido['produto']} | {pedido['endereco']}")
+            listbox.insert(
+                END,
+                f"{pedido['data']} | {pedido['contato']} | {pedido['produto']} | {pedido['observacao']} | "
+                f"R$ {pedido['valor']:.2f} | {pedido['nome_cliente']} | {pedido['endereco']} | {pedido['referencia']}"
+            )
         listbox.pack(padx=10, pady=10, fill=BOTH, expand=True)
+
+    # def abrir_lista_pedidos(self):
+    #     janela = Toplevel()
+    #     janela.title("Lista de Pedidos")
+    #     self.centralizar_janela(janela, 800, 400)
+    #     pedidos = self.negocio.listar_pedidos()
+    #     listbox = Listbox(janela, width=120, font=self.fontePadrao)
+    #     for pedido in pedidos:
+    #         listbox.insert(END, f"{pedido['data']} | {pedido['contato']} | {pedido['categoria']} | {pedido['produto']} | {pedido['endereco']}")
+    #     listbox.pack(padx=10, pady=10, fill=BOTH, expand=True)
 
     def abrir_lista_atendimentos(self):
         janela = Toplevel()

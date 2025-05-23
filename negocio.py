@@ -11,6 +11,11 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 import time
+import requests
+import json
+import mercadopago
+from datetime import datetime
+
 
 
 class Negocio:
@@ -27,24 +32,25 @@ class Negocio:
         if connection:
             try:
                 cursor = connection.cursor()
-                query = "SELECT * FROM usuarios WHERE usuario = %s AND senha = %s"
-                cursor.execute(query, (usuario, senha))
+                query = "SELECT senha, statuscli, data_expiracao FROM Usuarios WHERE usuario = %s"
+                cursor.execute(query, (usuario,))
                 resultado = cursor.fetchone()
                 if resultado:
-                    ret_senha = resultado[6]  # Supondo que a senha está na coluna 6
-                    return ret_senha == senha
+                    ret_senha, ret_statucli, data_expiracao = resultado
+                    if ret_senha == senha and ret_statucli == "L":
+                        if data_expiracao and datetime.now().date() > data_expiracao:
+                            print("Licença expirada.")
+                            return False
+                        return True
                 return False
             except Exception as e:
                 print(f"Erro ao autenticar usuário: {e}")
                 return False
             finally:
-                print("ATENÇÂO NÃO DEIXE ESSA MENSAGEM EM PRODUÇÃO")
                 cursor.close()
                 connection.close()
         else:
-            print("ATENÇÂO NÃO DEIXE ESSA MENSAGEM IR PARA PRODUÇÃO")
-            # seria para buscar dados local com o erro de conexao remoto TEMP TEMP nao mexer
-            return True #<<<< True é TEMP TEMP TEMP
+            return False
         
     # Metodo de usu exclusivo de testes não usar no comercio
     def inserir_usuario_local(self, usuario, senha):
@@ -224,7 +230,15 @@ class Negocio:
         else:
             print("Erro ao conectar ao banco local.")
             return []
-        
+
+    def buscar_produto_completo(self, nome_produto, categoria):
+        produtos = self.lista_produtos_por_categoria_completo(categoria)
+        for prod in produtos:
+            if prod[0] == nome_produto:
+                return prod  # (nome, observacao, valor)
+        return None   
+    
+     
     # negocio.py
     def lista_produtos_por_categoria(self, categoria_nome):
         conn = conexaosqllt()
@@ -309,15 +323,21 @@ class Negocio:
                 conn.close()
         return atendimentos
 
-    def registrar_pedido(self, contato, categoria, produto, endereco):
+    def registrar_pedido(self, contato, produtos, nome_cliente, endereco, referencia):
         conn = conexaosqllt()
         if conn:
             try:
                 cursor = conn.cursor()
-                cursor.execute("""
-                    INSERT INTO pedidos (contato, categoria, produto, endereco)
-                    VALUES (?, ?, ?, ?)
-                """, (contato, categoria, produto, endereco))
+                for prod in produtos:
+                    if len(prod) == 4:
+                        nome, observacao, valor, quantidade = prod
+                    else:
+                        nome, observacao, valor = prod
+                        quantidade = 1
+                    cursor.execute("""
+                        INSERT INTO pedidos (contato, produto, observacao, valor, quantidade, nome_cliente, endereco, referencia)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (contato, nome, observacao, valor, quantidade, nome_cliente, endereco, referencia))
                 conn.commit()
             except Exception as e:
                 print(f"Erro ao registrar pedido: {e}")
@@ -331,14 +351,20 @@ class Negocio:
         if conn:
             try:
                 cursor = conn.cursor()
-                cursor.execute("SELECT data_pedido, contato, categoria, produto, endereco FROM pedidos ORDER BY data_pedido DESC")
+                cursor.execute("""
+                    SELECT data_pedido, contato, produto, observacao, valor, nome_cliente, endereco, referencia
+                    FROM pedidos ORDER BY data_pedido DESC
+                """)
                 for row in cursor.fetchall():
                     pedidos.append({
                         "data": row[0],
                         "contato": row[1],
-                        "categoria": row[2],
-                        "produto": row[3],
-                        "endereco": row[4]
+                        "produto": row[2],
+                        "observacao": row[3],
+                        "valor": row[4],
+                        "nome_cliente": row[5],
+                        "endereco": row[6],
+                        "referencia": row[7]
                     })
             finally:
                 cursor.close()
@@ -365,6 +391,139 @@ class Negocio:
                 cursor.close()
                 conn.close()
         return atendimentos
+    
+
+    def buscaendereco(self, cep):
+        url = f'https://viacep.com.br/ws/{cep}/json/'
+        response = requests.get(url)
+        if response.status_code == 200:
+            ret_cep = response.json()
+            if "erro" not in ret_cep:
+                return ret_cep  # dict com logradouro, bairro, localidade, uf, etc.
+        return None
+    
+    
+
+    def gerar_link_pagamento(self, produtos, nome_cliente, email, documento, referencia, modo_sandbox=True):
+        # Use seu access_token do Mercado Pago
+        if modo_sandbox:
+            access_token = "TEST-1862219431167267-051810-c6d81dc3dfa2dd98bebf5e20b45bf3b4-683813691"
+        else:
+            access_token = "SEU_ACCESS_TOKEN_PRODUCAO"
+
+        sdk = mercadopago.SDK(access_token)
+
+        items = []
+        for prod in produtos:
+            if len(prod) == 4:
+                nome, observacao, valor, quantidade = prod
+            else:
+                nome, observacao, valor = prod
+                quantidade = 1
+            items.append({
+                "title": nome,
+                "description": observacao,
+                "quantity": quantidade,
+                "currency_id": "BRL",
+                "unit_price": float(valor)
+            })
+
+        preference_data = {
+            "items": items,
+            "payer": {
+                "name": nome_cliente,
+                "email": email,
+                "identification": {
+                    "type": "CPF" if len(documento) == 11 else "CNPJ",
+                    "number": documento
+                }
+            },
+            "external_reference": referencia,
+            "payment_methods": {
+                "excluded_payment_types": [{"id": "ticket"}],  # Exemplo: exclui boleto, remova se quiser permitir
+                "installments": 1
+            }
+        }
+
+        preference_response = sdk.preference().create(preference_data)
+        return preference_response["response"]["init_point"]  # Link de pagamento
+    
+
+    # ...dentro da classe Negocio...
+
+    def listar_usuarios(self):
+        connection = conexao()
+        usuarios = []
+        if connection:
+            try:
+                cursor = connection.cursor()
+                cursor.execute("SELECT iduser, usuario, statuscli, data_expiracao, plano FROM Usuarios")
+                for row in cursor.fetchall():
+                    usuarios.append({
+                        "id": row[0],
+                        "usuario": row[1],
+                        "statuscli": row[2],
+                        "data_expiracao": row[3],
+                        "plano": row[4]
+                    })
+            finally:
+                cursor.close()
+                connection.close()
+        return usuarios
+
+    def inserir_usuario(self, usuario, senha, statuscli, data_expiracao, plano):
+        connection = conexao()
+        if connection:
+            try:
+                cursor = connection.cursor()
+                cursor.execute(
+                    "INSERT INTO Usuarios (usuario, senha, statuscli, data_expiracao, plano) VALUES (%s, %s, %s, %s, %s)",
+                    (usuario, senha, statuscli, data_expiracao, plano)
+                )
+                connection.commit()
+                return True
+            except Exception as e:
+                print(f"Erro ao inserir usuário: {e}")
+                return False
+            finally:
+                cursor.close()
+                connection.close()
+        return False
+
+    def atualizar_usuario(self, id_usuario, usuario, statuscli, data_expiracao, plano):
+        connection = conexao()
+        if connection:
+            try:
+                cursor = connection.cursor()
+                cursor.execute(
+                    "UPDATE Usuarios SET usuario=%s, statuscli=%s, data_expiracao=%s, plano=%s WHERE iduser=%s",
+                    (usuario, statuscli, data_expiracao, plano, id_usuario)
+                )
+                connection.commit()
+                return True
+            except Exception as e:
+                print(f"Erro ao atualizar usuário: {e}")
+                return False
+            finally:
+                cursor.close()
+                connection.close()
+        return False
+
+    def excluir_usuario(self, id_usuario):
+        connection = conexao()
+        if connection:
+            try:
+                cursor = connection.cursor()
+                cursor.execute("DELETE FROM Usuarios WHERE iduser=%s", (id_usuario,))
+                connection.commit()
+                return True
+            except Exception as e:
+                print(f"Erro ao excluir usuário: {e}")
+                return False
+            finally:
+                cursor.close()
+                connection.close()
+        return False
 
 
 #FUNÇÔES exclusivas da classe Negocio

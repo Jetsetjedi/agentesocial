@@ -11,6 +11,7 @@ from negocio import Negocio
 
 class WhatsAppBot:
     def __init__(self):
+        self.carrinhos = {}  # contato: lista de produtos (tuplas)
         self.driver = None
         self.monitor_on_of = None
         self.ultimo_texto_processado = {}  # contato: texto
@@ -155,6 +156,17 @@ class WhatsAppBot:
                 if isinstance(self.atendimentos.get(contato), tuple) and self.atendimentos[contato][0] == "menu_produtos":
                     categoria_escolhida = self.atendimentos[contato][1]
                     produtos = self.obter_produtos_por_categoria_(categoria_escolhida)
+                    # ...dentro do bloco de escolha de produto...
+                    if dados_limpo.isdigit():
+                        produto_idx = int(dados_limpo)
+                        if 1 <= produto_idx <= len(produtos):
+                            produto_escolhido = produtos[produto_idx - 1]
+                            # Novo estado: coletar quantidade
+                            self.atendimentos[contato] = ("coletar_quantidade", categoria_escolhida, produto_escolhido)
+                            self.enviar_mensagem(contato, f"Você escolheu: *{produto_escolhido}*.\nQual a quantidade desejada?")
+                        else:
+                            self.enviar_mensagem(contato, "_Opção inválida. Por favor, escolha um produto válido._")
+                        continue
                     if dados_limpo.isdigit():
                         produto_idx = int(dados_limpo)
                         if 1 <= produto_idx <= len(produtos):
@@ -170,15 +182,43 @@ class WhatsAppBot:
                         self.enviar_menu_categorias(contato)
                     else:
                         self.enviar_mensagem(contato, "_Por favor, envie apenas o número do produto ou *'voltar'*._")
-                    continue
+                    continue                
 
-                # Confirmação do produto
-                if isinstance(self.atendimentos.get(contato), tuple) and self.atendimentos[contato][0] == "confirmar_produto":
+                # Coleta quantidade do produto
+                if isinstance(self.atendimentos.get(contato), tuple) and self.atendimentos[contato][0] == "coletar_quantidade":
                     _, categoria_escolhida, produto_escolhido = self.atendimentos[contato]
+                    if dados_limpo.isdigit() and int(dados_limpo) > 0:
+                        quantidade = int(dados_limpo)
+                        # Salva para confirmação
+                        self.atendimentos[contato] = ("confirmar_produto", categoria_escolhida, produto_escolhido, quantidade)
+                        self.enviar_mensagem(contato, f"Confirma a compra de *{quantidade}* unidade(s) de *{produto_escolhido}*? (sim/não)")
+                    else:
+                        self.enviar_mensagem(contato, "Por favor, informe uma quantidade válida (número maior que zero).")
+                    continue                
+                
+                # Confirmação do produto
+                # No fluxo de confirmação do produto:
+                if isinstance(self.atendimentos.get(contato), tuple) and self.atendimentos[contato][0] == "confirmar_produto":
+                    # Suporte tanto para 3 quanto 4 elementos (retrocompatível)
+                    if len(self.atendimentos[contato]) == 4:
+                        _, categoria_escolhida, produto_escolhido, quantidade = self.atendimentos[contato]
+                    else:
+                        _, categoria_escolhida, produto_escolhido = self.atendimentos[contato]
+                        quantidade = 1  # padrão antigo
+
                     if dados_limpo.lower() == "sim":
-                        self.atendimentos[contato] = ("coletar_endereco", categoria_escolhida, produto_escolhido)
-                        self.negocio.salvar_atendimento(contato, "coletar_endereco", categoria_escolhida, produto_escolhido)
-                        self.enviar_mensagem(contato, "Por favor, informe seu endereço para entrega:")
+                        produto_completo = self.negocio.buscar_produto_completo(produto_escolhido, categoria_escolhida)
+                        if produto_completo:
+                            # Adiciona ao carrinho como (nome, observacao, valor, quantidade)
+                            if contato not in self.carrinhos:
+                                self.carrinhos[contato] = []
+                            nome, observacao, valor = produto_completo
+                            self.carrinhos[contato].append((nome, observacao, valor, quantidade))
+                            self.enviar_mensagem(contato, "Produto adicionado ao carrinho!\nDeseja continuar comprando? (sim para continuar, finalizar para encerrar o pedido)")
+                            self.atendimentos[contato] = ("aguardando_continuar", categoria_escolhida)
+                            self.negocio.salvar_atendimento(contato, "aguardando_continuar", categoria_escolhida)
+                        else:
+                            self.enviar_mensagem(contato, "Erro ao adicionar produto ao carrinho.")
                     elif dados_limpo.lower() == "não":
                         self.atendimentos[contato] = "menu_categorias"
                         self.negocio.salvar_atendimento(contato, "menu_categorias")
@@ -187,13 +227,133 @@ class WhatsAppBot:
                         self.enviar_mensagem(contato, "Responda apenas com '*sim*' ou '*não*'.")
                     continue
 
+                # Fluxo para continuar comprando
+                if isinstance(self.atendimentos.get(contato), tuple) and self.atendimentos[contato][0] == "aguardando_continuar":
+                    if dados_limpo.lower() == "sim":
+                        self.atendimentos[contato] = "menu_categorias"
+                        self.negocio.salvar_atendimento(contato, "menu_categorias")
+                        self.enviar_menu_categorias(contato)
+                    elif dados_limpo.lower() == "finalizar":
+                        self.atendimentos[contato] = "coletar_dados_cliente"
+                        self.negocio.salvar_atendimento(contato, "coletar_dados_cliente")
+                        self.enviar_mensagem(contato, "Para finalizar, informe seu nome completo:")
+                    else:
+                        self.enviar_mensagem(contato, "Responda com 'sim' para continuar comprando ou 'finalizar' para encerrar o pedido.")
+                    continue                
+                
                 # Coleta endereço e finaliza pedido
-                if isinstance(self.atendimentos.get(contato), tuple) and self.atendimentos[contato][0] == "coletar_endereco":
-                    _, categoria_escolhida, produto_escolhido = self.atendimentos[contato]
-                    endereco = dados_limpo
-                    self.negocio.registrar_pedido(contato, categoria_escolhida, produto_escolhido, endereco)
-                    self.enviar_mensagem(contato, "*Pedido registrado! Em breve entraremos em contato para confirmar.*")
+                if self.atendimentos.get(contato) == "coletar_dados_cliente":
+                    nome_cliente = dados_limpo
+                    self.atendimentos[contato] = ("coletar_cep", nome_cliente)
+                    self.enviar_mensagem(contato, "Informe o CEP para entrega:")
+                    continue
+
+                # Novo bloco: coleta o CEP e consulta o endereço
+                if isinstance(self.atendimentos.get(contato), tuple) and self.atendimentos[contato][0] == "coletar_cep":
+                    nome_cliente = self.atendimentos[contato][1]
+                    cep = dados_limpo.replace("-", "").strip()
+                    endereco_info = self.negocio.buscaendereco(cep)
+                    if endereco_info:
+                        endereco_str = f"{endereco_info['logradouro']}, {endereco_info['bairro']}, {endereco_info['localidade']}-{endereco_info['uf']}"
+                        self.atendimentos[contato] = ("confirmar_endereco", nome_cliente, cep, endereco_str)
+                        self.enviar_mensagem(contato, f"Endereço encontrado:\n{endereco_str}\n\nEstá correto? (sim/não)")
+                    else:
+                        self.enviar_mensagem(contato, "CEP não encontrado ou inválido. Por favor, digite novamente:")
+                    continue
+
+                # Novo bloco: confirmação do endereço
+                if isinstance(self.atendimentos.get(contato), tuple) and self.atendimentos[contato][0] == "confirmar_endereco":
+                    nome_cliente = self.atendimentos[contato][1]
+                    cep = self.atendimentos[contato][2]
+                    endereco_str = self.atendimentos[contato][3]
+                    if dados_limpo.lower() == "sim":
+                        self.atendimentos[contato] = ("coletar_numero_complemento", nome_cliente, cep, endereco_str)
+                        self.enviar_mensagem(contato, "Informe o número e complemento (ex: 123, apto 45):")
+                    else:
+                        self.atendimentos[contato] = ("coletar_cep", nome_cliente)
+                        self.enviar_mensagem(contato, "Ok, digite o CEP novamente:")
+                    continue
+
+                # Novo bloco: coleta número e complemento
+                if isinstance(self.atendimentos.get(contato), tuple) and self.atendimentos[contato][0] == "coletar_numero_complemento":
+                    nome_cliente = self.atendimentos[contato][1]
+                    cep = self.atendimentos[contato][2]
+                    endereco_str = self.atendimentos[contato][3]
+                    numero_complemento = dados_limpo
+                    endereco_completo = f"{endereco_str}, {numero_complemento}, CEP: {cep}"
+                    self.atendimentos[contato] = ("coletar_referencia", nome_cliente, endereco_completo)
+                    self.enviar_mensagem(contato, "Informe um ponto de referência (ou digite '-' para ignorar):")
+                    continue
+
+                if isinstance(self.atendimentos.get(contato), tuple) and self.atendimentos[contato][0] == "coletar_referencia":
+                    nome_cliente = self.atendimentos[contato][1]
+                    endereco = self.atendimentos[contato][2]
+                    referencia = dados_limpo if dados_limpo != "-" else ""
+                    # Agora finalize o pedido
+                    produtos = self.carrinhos.get(contato, [])
+                    resumo = "*Resumo do pedido:*\n"
+                    total = 0
+                    for idx, prod in enumerate(produtos, 1):
+                        if len(prod) == 4:
+                            nome, observacao, valor, quantidade = prod
+                        else:
+                            nome, observacao, valor = prod
+                            quantidade = 1
+                        subtotal = valor * quantidade
+                        resumo += f"{idx}. {nome} - {observacao} - {quantidade}x R$ {valor:.2f} = R$ {subtotal:.2f}\n"
+                        total += subtotal
+                    resumo += f"\n*Total: R$ {total:.2f}*\n"
+                    resumo += f"\nNome: {nome_cliente}\nEndereço: {endereco}\nReferência: {referencia}"
+                    self.enviar_mensagem(contato, resumo)
+                    self.enviar_mensagem(contato, "Deseja pagar agora pelo Mercado Pago? (sim/não)")
+                    self.atendimentos[contato] = ("aguardando_pagamento", nome_cliente, endereco, referencia)
+                    continue
+
+                if isinstance(self.atendimentos.get(contato), tuple) and self.atendimentos[contato][0] == "aguardando_pagamento":
+                    # Recupere os dados do atendimento
+                    _, nome_cliente, endereco, referencia = self.atendimentos[contato]
+                    if dados_limpo.lower() == "sim":
+                        self.atendimentos[contato] = ("coletar_dados_pagamento", nome_cliente, endereco, referencia)
+                        self.enviar_mensagem(contato, "Informe seu CPF ou CNPJ:")
+                        continue
+
+                    elif dados_limpo.lower() == "não":
+                        produtos = self.carrinhos.get(contato, [])
+                        self.enviar_mensagem(contato, "*Pedido registrado! Em breve entraremos em contato para confirmar.*")
+                        self.negocio.registrar_pedido(contato, produtos, nome_cliente, endereco, referencia)
+                        self.atendimentos.pop(contato)
+                        self.carrinhos.pop(contato, None)
+                        self.negocio.salvar_atendimento(contato, "finalizado")
+                        continue
+
+                # Coleta CPF/CNPJ
+                if isinstance(self.atendimentos.get(contato), tuple) and self.atendimentos[contato][0] == "coletar_dados_pagamento":
+                    _, nome_cliente, endereco, referencia = self.atendimentos[contato]
+                    documento = dados_limpo.strip()
+                    if not documento or not documento.isdigit() or len(documento) not in [11, 14]:
+                        self.enviar_mensagem(contato, "CPF ou CNPJ inválido. Por favor, digite apenas os números (11 para CPF, 14 para CNPJ):")
+                        continue
+                    self.atendimentos[contato] = ("coletar_email_pagamento", nome_cliente, endereco, referencia, documento)
+                    self.enviar_mensagem(contato, "Informe seu e-mail para o pagamento:")
+                    continue
+
+                # Coleta e-mail
+                if isinstance(self.atendimentos.get(contato), tuple) and self.atendimentos[contato][0] == "coletar_email_pagamento":
+                    nome_cliente = self.atendimentos[contato][1]
+                    endereco = self.atendimentos[contato][2]
+                    referencia = self.atendimentos[contato][3]
+                    documento = self.atendimentos[contato][4]
+                    email = dados_limpo.strip()
+                    if not email or "@" not in email or "." not in email:
+                        self.enviar_mensagem(contato, "E-mail inválido. Por favor, digite um e-mail válido:")
+                        continue
+                    produtos = self.carrinhos.get(contato, [])
+                    link_pagamento = self.negocio.gerar_link_pagamento(produtos, nome_cliente, email, documento, referencia, modo_sandbox=True)
+                    self.enviar_mensagem(contato, f"Seu link de pagamento Mercado Pago:\n{link_pagamento}")
+                    self.enviar_mensagem(contato, "*Pedido registrado! Assim que o pagamento for confirmado, entraremos em contato.*")
+                    self.negocio.registrar_pedido(contato, produtos, nome_cliente, endereco, referencia)
                     self.atendimentos.pop(contato)
+                    self.carrinhos.pop(contato, None)
                     self.negocio.salvar_atendimento(contato, "finalizado")
                     continue
 
@@ -218,8 +378,10 @@ class WhatsAppBot:
     # mensagem de boas vindas ao detectar start
     def template_boas_vindas(self, contato):
         msg = (
-            f"*Bem-vindo {contato} ao atendimento automático!*\n\n"
-            "A palavra *start* inicia um atendimento virtual para venda de qualquer coisa."
+            f"*Bem-vindo* _{contato}_ *ao atendimento automático!*\n\n"
+            "A palavra *start* inicia um atendimento.\n\n"
+            "_Empresa_: *Carros Em Destaque*.\n\n"
+            "*Compre carro na palma da mão*\n\n"
         )
         self.enviar_mensagem(contato, msg)
 
@@ -231,9 +393,11 @@ class WhatsAppBot:
             nome = prod[0]
             observacao = prod[1]
             valor = prod[2]
+            if valor == 0:
+                continue  # Ignora produtos com valor 0
             menu += f"*{idx}* - _{nome}_\n"
-            menu += f"  *Observação:* _{observacao}_\n"
-            menu += f"  *Valor:* _R$_ _{valor:.2f}_\n"
+            menu += f"  Observação: {observacao}\n"
+            menu += f"  Valor: R$ {valor:.2f}\n"
         menu += "_Digite o número do produto desejado ou 'voltar' para escolher outra categoria._"
         self.enviar_mensagem(contato, menu)
 
@@ -250,7 +414,7 @@ class WhatsAppBot:
         produtos = self.negocio.lista_produtos_por_categoria_completo(categoria_nome)
         return  produtos  # Ajuste conforme o retorno do seu método
     
-    #Obtem os produtos da categoria para gragar somente o produto
+    #Obtem os produtos da categoria para gravar somente o produto
     def obter_produtos_por_categoria_(self, categoria_nome):
         # Busca produtos do banco pela categoria e retorna uma lista de nomes
         produtos = self.negocio.lista_produtos_por_categoria(categoria_nome)
